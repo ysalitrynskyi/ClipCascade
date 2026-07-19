@@ -1,0 +1,240 @@
+name: Release
+
+# Builds the server jar and the client apps, then attaches them to a GitHub
+# release. Upstream publishes binaries but this fork did not, which was a
+# problem: protocol v2 is enforced end to end and the fix that makes it work
+# over the default transport is client-side, so an upstream client build does
+# not sync against a server from this fork. People need binaries from here.
+#
+# Platform jobs do not fail the whole release (fail-fast: false, and the
+# release job runs on success-of-what-succeeded). A desktop toolchain breaking
+# should not stop the server jar and the APK from shipping.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    name: Server jar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Package
+        working-directory: ClipCascade_Server/ClipCascade_Backend
+        run: sh ./mvnw -q -B -DskipTests package
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp ClipCascade_Server/ClipCascade_Backend/target/*.jar dist/
+          ls -la dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server
+          path: dist/*.jar
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ClipCascade_Mobile/src/package-lock.json
+      - name: Install JS deps
+        working-directory: ClipCascade_Mobile/src
+        run: npm ci
+      - uses: android-actions/setup-android@v3
+      - name: Provide gradle.properties
+        working-directory: ClipCascade_Mobile/src/android
+        run: cp gradle.properties.example gradle.properties
+
+      # Release signing needs a keystore this repository does not carry. With
+      # the secrets configured the workflow produces a signed release APK;
+      # without them it produces a debug-signed APK, which installs fine and is
+      # labelled as such on the release rather than being silently absent.
+      - name: Decode upload keystore (if configured)
+        id: keystore
+        working-directory: ClipCascade_Mobile/src/android/app
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > upload.keystore
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No ANDROID_KEYSTORE_BASE64 secret; building a debug-signed APK."
+          fi
+
+      - name: Build APK
+        working-directory: ClipCascade_Mobile/src/android
+        env:
+          MYAPP_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MYAPP_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MYAPP_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          if [ "${{ steps.keystore.outputs.signed }}" = "true" ]; then
+            ./gradlew assembleRelease --no-daemon \
+              -PMYAPP_UPLOAD_STORE_FILE=upload.keystore \
+              -PMYAPP_UPLOAD_STORE_PASSWORD="$MYAPP_UPLOAD_STORE_PASSWORD" \
+              -PMYAPP_UPLOAD_KEY_ALIAS="$MYAPP_UPLOAD_KEY_ALIAS" \
+              -PMYAPP_UPLOAD_KEY_PASSWORD="$MYAPP_UPLOAD_KEY_PASSWORD"
+            find app/build/outputs/apk/release -name "*.apk" -exec cp {} ClipCascade.apk \;
+          else
+            ./gradlew assembleDebug --no-daemon
+            find app/build/outputs/apk/debug -name "*.apk" -exec cp {} ClipCascade-debug.apk \;
+          fi
+          ls -la *.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: ClipCascade_Mobile/src/android/*.apk
+
+  desktop:
+    name: Desktop (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            spec: ClipCascade_win.spec
+            requirements: requirements_win.txt
+          - os: macos-latest
+            label: macos
+            spec: ClipCascade_macos.spec
+            requirements: requirements_mac.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: ClipCascade_Desktop/src
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install -r ${{ matrix.requirements }}
+      - name: Build
+        working-directory: ClipCascade_Desktop/src
+        run: pyinstaller --noconfirm ${{ matrix.spec }}
+      - name: Package
+        working-directory: ClipCascade_Desktop/src/dist
+        shell: bash
+        run: |
+          if [ "${{ matrix.label }}" = "macos" ]; then
+            # Zip the .app bundle; a bare binary loses the bundle structure.
+            ditto -c -k --sequesterRsrc --keepParent ClipCascade.app \
+              "ClipCascade-macOS-$(uname -m).zip"
+          fi
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: |
+            ClipCascade_Desktop/src/dist/*.exe
+            ClipCascade_Desktop/src/dist/*.zip
+
+  desktop-source:
+    name: Desktop (Linux source)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Linux ships as source, as upstream does: the GTK/tray stack is tied to
+      # the running distribution, so a frozen binary is less portable than the
+      # source plus the documented dependency steps.
+      - name: Archive
+        run: |
+          mkdir -p dist stage
+          # Stage under the name the archive should unpack as, rather than
+          # relying on tar --transform (GNU-only, so it cannot be checked on a
+          # macOS or BSD box before pushing).
+          cp -R ClipCascade_Desktop/src stage/ClipCascade
+          rm -rf stage/ClipCascade/tests stage/ClipCascade/__pycache__
+          find stage -name "__pycache__" -type d -prune -exec rm -rf {} +
+          find stage \( -name ".DS_Store" -o -name "*.pyc" \) -delete
+          tar -caf dist/ClipCascade_Linux.tar.xz -C stage ClipCascade
+          ls -la dist/
+          tar -tf dist/ClipCascade_Linux.tar.xz | head -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: dist/*.tar.xz
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: [server, android, desktop, desktop-source]
+    if: always() && needs.server.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name "*.jar" -o -name "*.apk" -o -name "*.exe" -o -name "*.zip" -o -name "*.tar.xz" \) \
+            -exec cp {} dist/ \;
+          ls -la dist/
+      - name: Release notes
+        run: |
+          cat > notes.md <<'EOF'
+          Security-hardened ClipCascade. See the [README](https://github.com/ysalitrynskyi/ClipCascade#what-is-different-from-upstream)
+          for what differs from upstream, and [HARDENING_NEXT_STEPS.md](https://github.com/ysalitrynskyi/ClipCascade/blob/main/HARDENING_NEXT_STEPS.md)
+          for what is deliberately still open.
+
+          ### Server
+
+          Prebuilt multi-arch image, no build step:
+
+          ```
+          docker pull ghcr.io/ysalitrynskyi/clipcascade:latest
+          ```
+
+          `linux/amd64` and `linux/arm64`. The jar below is for bare-metal installs.
+
+          ### Clients
+
+          **Build from this fork, not upstream.** Protocol v2 is enforced end to end and the
+          fix that makes it work over the default transport is client-side, so an upstream
+          client will not sync against a server from this fork.
+
+          Migrating an existing deployment? Read
+          [docs/MIGRATE_EXISTING_DOCKER.md](https://github.com/ysalitrynskyi/ClipCascade/blob/main/docs/MIGRATE_EXISTING_DOCKER.md)
+          first — the volume needs a `chown` and the H2 password must match.
+          EOF
+          if ls dist/ClipCascade-debug.apk >/dev/null 2>&1; then
+            echo "" >> notes.md
+            echo "> The Android APK is **debug-signed**: this repository carries no release keystore. It installs normally, but you may need to allow installation from unknown sources, and it cannot be installed over a Play-signed build." >> notes.md
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ClipCascade ${{ github.event.inputs.tag || github.ref_name }}
+          body_path: notes.md
+          files: dist/*
+          fail_on_unmatched_files: true
