@@ -124,8 +124,15 @@ jobs:
             label: windows
             spec: ClipCascade_win.spec
             requirements: requirements_win.txt
+          # macos-latest is Apple silicon; macos-13 is the last Intel runner.
+          # PyInstaller cannot cross-build, so an Intel Mac needs its own job —
+          # upstream ships both, and dropping one silently strands those users.
           - os: macos-latest
-            label: macos
+            label: macos-arm64
+            spec: ClipCascade_macos.spec
+            requirements: requirements_mac.txt
+          - os: macos-13
+            label: macos-intel
             spec: ClipCascade_macos.spec
             requirements: requirements_mac.txt
     steps:
@@ -145,11 +152,11 @@ jobs:
         working-directory: ClipCascade_Desktop/src/dist
         shell: bash
         run: |
-          if [ "${{ matrix.label }}" = "macos" ]; then
+          case "${{ matrix.label }}" in macos-*)
             # Zip the .app bundle; a bare binary loses the bundle structure.
             ditto -c -k --sequesterRsrc --keepParent ClipCascade.app \
-              "ClipCascade-macOS-$(uname -m).zip"
-          fi
+              "ClipCascade-macOS-$(uname -m).zip" ;;
+          esac
           ls -la
       - uses: actions/upload-artifact@v4
         with:
