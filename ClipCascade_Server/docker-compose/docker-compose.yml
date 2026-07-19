@@ -6,7 +6,9 @@
 
 services:
   clipcascade:
-    image: ${CLIPCASCADE_IMAGE:?Set a pinned ClipCascade image tag or digest}
+    # Prebuilt multi-arch image (linux/amd64 + linux/arm64), published by
+    # .github/workflows/publish.yml. Pin a tag or digest for production.
+    image: ${CLIPCASCADE_IMAGE:-ghcr.io/ysalitrynskyi/clipcascade:latest}
     # # 🚀 If you want to always use the latest version of ClipCascade Server, uncomment the line below and comment out the line above.
     # # Use a pinned tag or digest. Avoid 'latest' in production.
 

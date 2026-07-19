@@ -4,6 +4,52 @@
 
 **No Server? No Problem!** Instantly sync your clipboard using the **Live Community Server** at **[clipcascade.sathvik.dev](http://clipcascade.sathvik.dev/)**—**no setup needed**. Just create an account and start sharing your clipboard across devices in seconds!
 
+---
+
+> ### 🔐 This is a security-hardened fork
+>
+> A fork of [Sathvik-Rao/ClipCascade](https://github.com/Sathvik-Rao/ClipCascade) with a
+> security baseline applied and a prebuilt multi-arch container image. The changes are
+> proposed upstream in [PR #163](https://github.com/Sathvik-Rao/ClipCascade/pull/163).
+>
+> **Quick start — no build step:**
+>
+> ```bash
+> cd ClipCascade_Server/docker-compose
+> cp .env.tailscale-ghcr.example .env      # then edit: bind address + origins + DB password
+> docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env pull
+> docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env up -d
+> ```
+>
+> Image: `ghcr.io/ysalitrynskyi/clipcascade:latest` — `linux/amd64` and `linux/arm64`,
+> so it runs on x86 and on ARM boards and Ampere VMs alike.
+>
+> **What is different from upstream**
+>
+> - No default database password, and the server refuses to start without one
+> - `CC_ALLOWED_ORIGINS=*` refuses to start — a wildcard lets any website open an
+>   authenticated WebSocket with a visitor's cookie and read their clipboard
+> - `X-Forwarded-For` is trusted only from `CC_TRUSTED_PROXY_CIDRS`, so a client
+>   cannot choose the address that brute-force lockout is keyed on
+> - Container runs as a non-root user; compose binds to **loopback by default**
+>   instead of every interface
+> - Content-Security-Policy with no inline scripts
+> - Clipboard protocol v2: replay protection, and metadata bound inside the
+>   ciphertext so a relay cannot rewrite it
+> - Client secrets in the OS keyring (desktop) and Keychain/Keystore (mobile)
+> - Android no longer needs `READ_LOGS` or the overlay permission
+> - First-class Tailscale / private-mesh support — see [`docs/TAILSCALE.md`](docs/TAILSCALE.md)
+>
+> **Read before deploying:** [`SECURITY_SELF_HOST.md`](SECURITY_SELF_HOST.md) ·
+> [`docs/MIGRATE_EXISTING_DOCKER.md`](docs/MIGRATE_EXISTING_DOCKER.md) (migrating an
+> existing volume) · [`HARDENING_NEXT_STEPS.md`](HARDENING_NEXT_STEPS.md) (what is
+> honestly still open)
+>
+> **Clients must be rebuilt from this fork.** The protocol fix is client-side, so
+> upgrading only the server will not restore sync.
+
+---
+
 <div align="center">
 
 <table>

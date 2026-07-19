@@ -1,0 +1,80 @@
+name: Publish container image
+
+# Builds the server image and pushes it to GHCR so a deployment is just
+# `docker compose pull`, with no local build step.
+#
+# Fork-specific: this publishes to this repository's own namespace, so it is
+# deliberately not part of the upstream pull request.
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # The Dockerfile expects target/*.jar to already exist. The jar is
+      # architecture-independent, so one build serves every platform below.
+      - name: Build the server jar
+        working-directory: ClipCascade_Server/ClipCascade_Backend
+        run: sh ./mvnw -q -B -DskipTests package
+
+      # arm64 is emulated, which is slow but correct. It matters: Oracle Ampere
+      # and Raspberry Pi hosts are common for self-hosting, and an amd64-only
+      # image silently excludes them.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ClipCascade_Server/ClipCascade_Backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report what was published
+        run: |
+          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Platforms: linux/amd64, linux/arm64" >> "$GITHUB_STEP_SUMMARY"

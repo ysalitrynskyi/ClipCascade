@@ -1,0 +1,68 @@
+# Ready-to-run Tailscale self-host using the prebuilt multi-arch image.
+#
+# No build step and no other compose file needed:
+#
+#   cp .env.tailscale-ghcr.example .env
+#   # edit .env: CC_BIND_ADDRESS + CC_ALLOWED_ORIGINS = this host's Tailscale IP
+#   docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env pull
+#   docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env up -d
+#
+# Migrating an existing volume from sathvikrao/clipcascade:latest? Read
+# docs/MIGRATE_EXISTING_DOCKER.md first — the volume must be chowned to uid
+# 10001, and CC_SERVER_DB_PASSWORD must match the password the H2 files were
+# created with, or the database will not open.
+
+services:
+  clipcascade:
+    image: ${CLIPCASCADE_IMAGE:-ghcr.io/ysalitrynskyi/clipcascade:latest}
+    container_name: clipcascade
+    restart: unless-stopped
+
+    # Bound to the tailnet address only. Publishing on 0.0.0.0 would also expose
+    # the server on every other interface, including a public one, which defeats
+    # the point of putting it on a tailnet. Find yours with: tailscale ip -4
+    ports:
+      - "${CC_BIND_ADDRESS:?Set CC_BIND_ADDRESS to this host's Tailscale IP (tailscale ip -4)}:8080:8080"
+
+    volumes:
+      - clipcascade-data:/database
+      - clipcascade-logs:/logs
+
+    environment:
+      - CC_PORT=8080
+
+      # Exact origins only, comma separated. The server refuses to start on *,
+      # because a wildcard lets any website open an authenticated WebSocket with
+      # a visitor's cookie and read their clipboard.
+      - CC_ALLOWED_ORIGINS=${CC_ALLOWED_ORIGINS:?Set exact origins, e.g. http://100.64.0.1:8080}
+
+      # H2 with CIPHER=AES needs "<file password> <user password>" — the space
+      # is part of the value.
+      - CC_SERVER_DB_PASSWORD=${CC_SERVER_DB_PASSWORD:?Set the H2 file and user password}
+
+      # Only applied when the user table is empty. Leave unset when migrating an
+      # existing volume, where the admin already exists.
+      - CC_INITIAL_ADMIN_PASSWORD=${CC_INITIAL_ADMIN_PASSWORD:-}
+
+      - CC_MAX_MESSAGE_SIZE_IN_MiB=${CC_MAX_MESSAGE_SIZE_IN_MiB:-100}
+      - CC_P2P_ENABLED=${CC_P2P_ENABLED:-false}
+      - CC_SIGNUP_ENABLED=${CC_SIGNUP_ENABLED:-false}
+      - CC_UPDATE_CHECK_ENABLED=${CC_UPDATE_CHECK_ENABLED:-false}
+
+      # Sessions default to 24h. Older releases defaulted to about a year; set
+      # this if you do not want to sign in again daily.
+      - CC_SESSION_TIMEOUT=${CC_SESSION_TIMEOUT:-1440m}
+
+      - TZ=${TZ:-UTC}
+      - JAVA_TOOL_OPTIONS=${JAVA_TOOL_OPTIONS:--Xmx2g -Xms512m}
+
+    # Large messages are buffered per WebSocket session on top of the heap, so
+    # leave headroom above -Xmx or the container is OOM-killed (exit 137).
+    mem_limit: ${CC_MEM_LIMIT:-6g}
+
+volumes:
+  clipcascade-data:
+    name: clipcascade-data
+    external: true
+  clipcascade-logs:
+    name: clipcascade-logs
