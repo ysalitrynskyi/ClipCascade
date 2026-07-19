@@ -135,6 +135,13 @@ jobs:
             label: macos-intel
             spec: ClipCascade_macos.spec
             requirements: requirements_mac.txt
+            # GitHub is retiring the Intel macOS image, so this job can sit
+            # queued indefinitely. Never let it hold up a release: if a runner
+            # is available the build ships, otherwise the release goes out
+            # without it.
+            optional: true
+    continue-on-error: ${{ matrix.optional || false }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
