@@ -1,114 +1,122 @@
-# <img src="https://github.com/user-attachments/assets/710bb1c3-0eda-48cf-819a-e066bde3a3ec" alt="ClipCascade Logo" width="34" /> ClipCascade
+# <img src="https://github.com/user-attachments/assets/710bb1c3-0eda-48cf-819a-e066bde3a3ec" alt="ClipCascade Logo" width="34" /> ClipCascade — security-hardened fork
 
-**ClipCascade** is a lightweight, open-source utility that automatically syncs your clipboard across multiple devices—no manual input required. It ensures seamless sharing with robust end-to-end encryption, providing a secure and reliable clipboard experience across workstations.
+**ClipCascade** automatically syncs your clipboard across your devices, end-to-end encrypted, with no manual step.
 
-**No Server? No Problem!** Instantly sync your clipboard using the **Live Community Server** at **[clipcascade.sathvik.dev](http://clipcascade.sathvik.dev/)**—**no setup needed**. Just create an account and start sharing your clipboard across devices in seconds!
+This is a fork of [Sathvik-Rao/ClipCascade](https://github.com/Sathvik-Rao/ClipCascade) that applies a security baseline and publishes a
+prebuilt multi-arch server image. The changes are proposed upstream in
+[PR #163](https://github.com/Sathvik-Rao/ClipCascade/pull/163).
 
----
-
-> ### 🔐 This is a security-hardened fork
->
-> A fork of [Sathvik-Rao/ClipCascade](https://github.com/Sathvik-Rao/ClipCascade) with a
-> security baseline applied and a prebuilt multi-arch container image. The changes are
-> proposed upstream in [PR #163](https://github.com/Sathvik-Rao/ClipCascade/pull/163).
->
-> **Quick start — no build step:**
->
-> ```bash
-> cd ClipCascade_Server/docker-compose
-> cp .env.tailscale-ghcr.example .env      # then edit: bind address + origins + DB password
-> docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env pull
-> docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env up -d
-> ```
->
-> Image: `ghcr.io/ysalitrynskyi/clipcascade:latest` — `linux/amd64` and `linux/arm64`,
-> so it runs on x86 and on ARM boards and Ampere VMs alike.
->
-> **What is different from upstream**
->
-> - No default database password, and the server refuses to start without one
-> - `CC_ALLOWED_ORIGINS=*` refuses to start — a wildcard lets any website open an
->   authenticated WebSocket with a visitor's cookie and read their clipboard
-> - `X-Forwarded-For` is trusted only from `CC_TRUSTED_PROXY_CIDRS`, so a client
->   cannot choose the address that brute-force lockout is keyed on
-> - Container runs as a non-root user; compose binds to **loopback by default**
->   instead of every interface
-> - Content-Security-Policy with no inline scripts
-> - Clipboard protocol v2: replay protection, and metadata bound inside the
->   ciphertext so a relay cannot rewrite it
-> - Client secrets in the OS keyring (desktop) and Keychain/Keystore (mobile)
-> - Android no longer needs `READ_LOGS` or the overlay permission
-> - First-class Tailscale / private-mesh support — see [`docs/TAILSCALE.md`](docs/TAILSCALE.md)
->
-> **Read before deploying:** [`SECURITY_SELF_HOST.md`](SECURITY_SELF_HOST.md) ·
-> [`docs/MIGRATE_EXISTING_DOCKER.md`](docs/MIGRATE_EXISTING_DOCKER.md) (migrating an
-> existing volume) · [`HARDENING_NEXT_STEPS.md`](HARDENING_NEXT_STEPS.md) (what is
-> honestly still open)
->
-> **Clients must be rebuilt from this fork.** The protocol fix is client-side, so
-> upgrading only the server will not restore sync.
+> **Why this fork exists.** Reviewing the upstream project for self-hosting turned up a set of
+> defaults that are risky on a private network — a baked-in database password, a wildcard
+> WebSocket origin, a forwarded-header path a client could steer, and containers published on
+> every interface. Fixing those is what this fork is. Everything here is offered upstream; if it
+> lands, this fork stops being necessary.
 
 ---
 
-<div align="center">
+## What is different from upstream
 
-<table>
-  <tr>
-    <th>Docker</th>
-    <th>Windows</th>
-    <th>macOS</th>
-    <th>Android</th>
-    <th>Linux</th>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://hub.docker.com/r/sathvikrao/clipcascade">
-        <img src="https://www.docker.com/wp-content/uploads/2022/03/Moby-logo.png" alt="Docker" width="50" />
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/Sathvik-Rao/ClipCascade/releases">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_logo_-_2012.svg" alt="Windows" width="50" />
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/Sathvik-Rao/ClipCascade/releases">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg" alt="macOS" width="40" />
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/Sathvik-Rao/ClipCascade/releases">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/d/d7/Android_robot.svg" alt="Android" width="40" />
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/Sathvik-Rao/ClipCascade/releases">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/3/35/Tux.svg" alt="Linux" width="40" />
-      </a>
-    </td>
-  </tr>
-</table>
+| | Upstream | Here |
+|---|---|---|
+| Database password | Baked-in default | Required; the server refuses to start without it |
+| `CC_ALLOWED_ORIGINS=*` | Accepted | Refused at startup — a wildcard lets any site open an authenticated WebSocket with a visitor's cookie and read their clipboard |
+| `X-Forwarded-For` | Trusted from any peer | Trusted only from `CC_TRUSTED_PROXY_CIDRS`, canonicalised, so a client cannot pick the address brute-force lockout keys on |
+| Container user | root | uid 10001 |
+| Published port | `0.0.0.0` | `CC_BIND_ADDRESS`, defaulting to loopback |
+| CSP | Inline scripts allowed | `script-src 'self'`, no inline scripts |
+| Clipboard protocol | v1, no replay protection | v2 — device id, counter and timestamp bound inside the ciphertext |
+| Client secrets | Plaintext on disk | OS keyring (desktop), Keychain/Keystore (mobile) |
+| Android capture | Needed `READ_LOGS` / overlay | Share sheet, QS tile, notification action — no such permission |
+| Server image | Docker Hub, amd64 | GHCR, `linux/amd64` + `linux/arm64` |
 
-</div>
+Full detail: [`SECURITY_SELF_HOST.md`](SECURITY_SELF_HOST.md). What is deliberately **not** done:
+[`HARDENING_NEXT_STEPS.md`](HARDENING_NEXT_STEPS.md).
 
-<br />
+---
 
-<div align="center">
-	<table>
-		<tr>
-			<td>
-				<div align="center">
-    				<img src="https://github.com/user-attachments/assets/0b7178fd-e40f-400c-9c6f-6ea9f4e5b800" alt="arch_design_p2s" width="360" height="300" />
-				</div>
-			</td>
-			<td>
-				<div align="center">
-    				<img src="https://github.com/user-attachments/assets/32366820-fc48-4849-914f-fe0474fa308a" alt="arch_design_p2p" width="360" height="300" />
-				</div>
-			</td>
-    	</tr>
-	</table>
-</div>
+## Quick start (server)
+
+A prebuilt multi-arch image is published to GHCR, so there is no build step.
+
+```bash
+git clone https://github.com/ysalitrynskyi/ClipCascade.git
+cd ClipCascade/ClipCascade_Server/docker-compose
+
+cp .env.tailscale-ghcr.example .env
+# edit .env — at minimum:
+#   CC_BIND_ADDRESS      this host's address (tailscale ip -4, or a LAN IP)
+#   CC_ALLOWED_ORIGINS   the exact origin(s) you will open, comma separated
+#   CC_SERVER_DB_PASSWORD  "<file password> <user password>" — the space is part of it
+#   CC_INITIAL_ADMIN_PASSWORD  first boot only
+
+docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env pull
+docker compose -f docker-compose.tailscale-ghcr.yml --env-file .env up -d
+curl -sS http://<CC_BIND_ADDRESS>:8080/health   # -> OK
+```
+
+`ghcr.io/ysalitrynskyi/clipcascade:latest` runs on `linux/amd64` and `linux/arm64`, so x86 servers, Ampere VMs
+and Raspberry Pi hosts all work.
+
+Other topologies (Postgres, external broker, plain loopback) are in
+[`ClipCascade_Server/docker-compose/`](ClipCascade_Server/docker-compose). All of them default to a
+loopback bind; set `CC_BIND_ADDRESS` to expose the server deliberately rather than by accident.
+
+**Already running the upstream image?** Read
+[`docs/MIGRATE_EXISTING_DOCKER.md`](docs/MIGRATE_EXISTING_DOCKER.md) first. Two things bite: the
+volume must be `chown`ed to uid 10001, and `CC_SERVER_DB_PASSWORD` must match the password the H2
+files were created with or the database will not open.
+
+### Running on Tailscale
+
+Recommended, and what this fork is tuned for: bind the server to its tailnet address and never
+open a port to the internet. See [`docs/TAILSCALE.md`](docs/TAILSCALE.md).
+
+---
+
+## Clients
+
+> **Clients must be built from this fork.** Protocol v2 is enforced end to end, and the fix that
+> makes it work over the default transport is client-side — so an upstream client build will not
+> sync against this server, and vice versa. This fork does **not** publish prebuilt client
+> binaries; build from source as below.
+
+### Desktop (Windows, macOS, Linux)
+
+The desktop client is Python and runs directly from source:
+
+```bash
+cd ClipCascade_Desktop/src
+python -m pip install -r requirements_linux.txt   # or requirements_win.txt / requirements_mac.txt
+python main.py
+```
+
+Secrets are stored in the OS keyring, so a keyring backend must be available — on a headless Linux
+box install `gnome-keyring` or `kwallet` first. Without one the client refuses to write secrets to
+disk rather than storing them in plaintext.
+
+Linux needs a few system packages and has some well-known pitfalls; the dependency and
+troubleshooting steps below are unchanged from upstream and still apply.
+
+### Android
+
+```bash
+cd ClipCascade_Mobile/src
+npm ci
+cp android/gradle.properties.example android/gradle.properties
+cd android && ./gradlew assembleRelease     # or assembleDebug
+```
+
+The APK lands in `android/app/build/outputs/apk/`. Release builds need a signing key — see
+[`docs/SIGNING.md`](docs/SIGNING.md).
+
+### iOS
+
+Buildable from `ClipCascade_Mobile/src/ios`, but note the open item in
+[`HARDENING_NEXT_STEPS.md`](HARDENING_NEXT_STEPS.md): the GCM nonce fix that makes desktop→iOS
+decryption work is reasoned from Apple's documented contract and has not been confirmed on a
+device.
+
+---
 
 ## 📸 Screenshots
 
@@ -174,309 +182,9 @@
 </div>
 
 
-## 📥 Installation Guide
+---
 
-### 🦾 Self-Hosting ClipCascade on Bare Metal:
-
-To deploy the ClipCascade server on any operating system that supports Java 21 or later, follow the steps outlined below.
-
-1. **Download the Server JAR File**  
-
-    Obtain the latest release of `ClipCascade-Server-JRE_21.jar` from the [release page](https://github.com/Sathvik-Rao/ClipCascade/releases).
-
-2. **Configure Required Environment Variables**
-
-    A fresh server requires explicit secrets before first startup. Generate strong values and keep them outside source control.
-
-    For a comprehensive list of available environment variables, refer to the [Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details) section.
-
-    | Variable                     | Description                                                                                          | Default Value     | Example                           |
-    |------------------------------|------------------------------------------------------------------------------------------------------|-------------------|-----------------------------------|
-    | `CC_MAX_MESSAGE_SIZE_IN_MiB` | Defines the maximum allowed message size in MiB. Ignored if `CC_P2P_ENABLED` is set to `true`.       | `1`               | `3`                               |
-    | `CC_ALLOWED_ORIGINS`         | Specifies the allowed WebSocket origins for secure cross-origin access.                              | `http://localhost:8080` | `https://clipcascade.example.com` |
-    | `CC_P2P_ENABLED`             | Enables or disables peer-to-peer mode. When enabled, `CC_MAX_MESSAGE_SIZE_IN_MiB` is ignored.        | `false`           | `true`                            |
-    | `CC_SIGNUP_ENABLED`          | Allows or restricts user self-registration.                                                          | `false`           | `false`                           |
-    | `CC_PORT`                    | Specifies the port on which the server listens for incoming connections.                             | `8080`            | `1234`                            |
-    | `CC_INITIAL_ADMIN_PASSWORD`  | Initial admin password used only when the user database is empty.                                    | required          | generated secret                  |
-    | `CC_SERVER_DB_PASSWORD`      | H2 file database password: `<file password> <user password>`.                                        | required          | generated pair                    |
-   
-3. **Start the Server**  
-    Run the following command in the terminal to launch the ClipCascade server:
-
-    ```bash
-    CC_INITIAL_ADMIN_PASSWORD="replace-with-strong-password" \
-    CC_SERVER_DB_PASSWORD="<file password> <user password>" \
-    java -jar ClipCascade-Server-JRE_21.jar
-    ```
-   
-4. **Access the Server**  
-    Once the server is running, you can access it via:
-
-    ```
-    http://localhost:8080
-    ```
-
-    - **Initial Admin Credentials:**
-      - **Username:** `admin` by default, configurable with `CC_INITIAL_ADMIN_USERNAME`
-      - **Password:** set `CC_INITIAL_ADMIN_PASSWORD` before first startup
-
-> **Important:** A new server will refuse to start until `CC_INITIAL_ADMIN_PASSWORD` is set. Change the initial admin password immediately after the first login.
-
-For guidance on setting up a **reverse proxy**, refer to the [Reverse Proxy Setup](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#-reverse-proxy-setup) section.
-
-[➡️ Explore Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details)
-
-* * * * * * *
-
-### 🐳 Self-Hosting ClipCascade Using Docker:
-
-#### Quick Installation (Single Command)
-
-For users who prefer a one-liner, set the required secrets first:
-
-```bash
-docker volume create clipcascade_database
-docker run -d --name clipcascade \
-  -p 8080:8080 \
-  -e CC_MAX_MESSAGE_SIZE_IN_MiB=1 \
-  -e CC_ALLOWED_ORIGINS=http://localhost:8080 \
-  -e CC_INITIAL_ADMIN_PASSWORD="replace-with-strong-password" \
-  -e CC_SERVER_DB_PASSWORD="<file password> <user password>" \
-  -v clipcascade_database:/database \
-  your-registry/clipcascade:3.2.0
-```
-
-#### Detailed Installation Steps
-
-To host ClipCascade on your server using Docker, follow these steps:
-
-1. Create a `docker-compose.yml` File
-
-    Create a `docker-compose.yml` file with the following content, or download it from the [release page](https://github.com/Sathvik-Rao/ClipCascade/releases):
-
-    ```yaml
-    services:
-      clipcascade:
-        image: your-registry/clipcascade:3.2.0
-        ports:
-          - "8080:8080"  # Expose the ClipCascade server on port 8080
-        restart: always  # Automatically restart the container if it stops
-        volumes:
-          - clipcascade_database:/database  # Persistent storage for user data
-          - clipcascade_logs:/logs
-        environment:
-          - CC_MAX_MESSAGE_SIZE_IN_MiB=1   # Maximum message size in MiB (ignored if P2P mode is enabled)
-          - CC_P2P_ENABLED=false  # Enables or disables peer-to-peer(P2P) mode
-          - CC_ALLOWED_ORIGINS=https://clipcascade.example.com  # Defines allowed WebSocket origins for security
-          - CC_INITIAL_ADMIN_PASSWORD=change-this-before-first-start
-          - CC_SERVER_DB_PASSWORD="<file password> <user password>"
-          # - CC_SIGNUP_ENABLED=false  # Enables or disables user self-registration
-    volumes:
-      clipcascade_database:
-      clipcascade_logs:
-   ```
-    
-   For additional `.yml` configuration files, visit [ClipCascade Server Docker Configuration](https://github.com/Sathvik-Rao/ClipCascade/tree/main/ClipCascade_Server/docker-compose).
-  
-2. Deploy the Docker Container
-
-    Run the Docker container using Docker Compose:
-
-    ```
-    docker-compose up -d
-    ```
-
-3. **Access the Server**  
-    Once the server is running, you can access it via:
-
-    ```
-    http://localhost:8080
-    ```
-
-    Use HTTPS/WSS before connecting mobile release clients or exposing the server beyond loopback.
-
-      - **Initial Admin Credentials:**
-      - **Username:** `admin` by default, configurable with `CC_INITIAL_ADMIN_USERNAME`
-      - **Password:** set `CC_INITIAL_ADMIN_PASSWORD` before first startup
-
-
-> **Important:** A new server will refuse to start until `CC_INITIAL_ADMIN_PASSWORD` is set. Change the initial admin password immediately after the first login.
-
-For guidance on setting up a **reverse proxy**, refer to the [Reverse Proxy Setup](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#-reverse-proxy-setup) section.
-
-[➡️ Explore Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details)
-
-<div align="center">
-   <img src="https://github.com/user-attachments/assets/02151726-2a26-42d7-8863-ae4512754eb3" alt="Web Page login" width="300"  />
-   <img src="https://github.com/user-attachments/assets/6f346d46-3334-4306-9f62-e0f98f1c0506" alt="Web Page home" width="300"  />
-   <img src="https://github.com/user-attachments/assets/74252e8e-e8f9-4a9a-a15d-0c3cc987b09c" alt="Web Page advance" width="300"  />
-</div>
-
-* * * * * * *
-
-### 🪟 Windows Desktop Application:
-
-To install the ClipCascade Windows desktop application, follow these steps:
-
-1. **Download the Installer**
-    - Get the latest version of ClipCascade from the [Releases page](https://github.com/Sathvik-Rao/ClipCascade/releases).
-2. **Install the Application**
-    - Run the downloaded `.msi` installer and follow the on-screen instructions, and select the default installation path specified by the installer.
-    - Startup is enabled by default; you can disable it in the Task Manager if desired.
-3. **Launch and Configure**
-    - Open ClipCascade after installation and **log in** to start syncing your clipboard across devices.
-    - When prompted, enter your **server's IP address, port number, or domain name**.
-    - If encryption is enabled, ensure it is **enabled on all devices**.
-    - In the **Extra Config** section, you can set a local clipboard size limit. By default, no limit is enforced (note: large file transfers may cause temporary unresponsiveness).
-4. **Network Access Prompt (P2P Mode)**
-    - If the server is running in **P2P mode**, you will see a Windows security prompt asking, **"Do you want to allow public and private networks to access this app?"**
-
-      <img src="https://github.com/user-attachments/assets/d5ededb1-0d21-4686-91bd-e0a22cdb54e5" alt="win_network_prompt" width="150"  />
-
-    - This is because each client device acts as a **peer** in the network, requiring direct communication.
-    - Click **Allow** to enable clipboard data syncing across your devices without the help of a server. The server is needed only for signaling and authentication.
-
-**Important Note:** Since the application is not published or registered with Microsoft, you may see a warning suggesting that it could be unsafe. This is a standard precaution and does not indicate any issues with the software. You can choose to ignore this warning or temporarily disable your antivirus during installation. All source code is available in this repository, and everything is open source and free. If you prefer, you can compile the executable yourself. Feel free to review the code to ensure your comfort! **Registering the application with Microsoft requires purchasing a certificate subscription, which is quite expensive, especially for an open-source project.**
-
-To build your own desktop executable from source (`ClipCascade_Desktop/src`):
-```bash
-pip3 install -r requirements_win.txt
-python3 -m PyInstaller ClipCascade_win.spec
-```
-
-The `.exe` file does not need UAC approval because it is standalone executable, while the `.msi` installer will request UAC permissions because it creates a designated folder for the software, adds a startup option, and allows for uninstallation via the Control Panel. Additionally, with the .msi installer, you have the option to choose any location to save the software. However, select locations where even when you create a file manually at that location, Windows shouldn’t prompt for permission to answer "yes or no" questions.
-
-[➡️ Explore Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details)
-
-* * * * * * *
-
-### 🍏 macOS Desktop Application:
-
-To install the ClipCascade macOS desktop application, follow these steps:
-
-1. **Download the Application**
-    - Visit the [Releases page](https://github.com/Sathvik-Rao/ClipCascade/releases) and download the appropriate version:
-      - **For M-series chips** (Apple Silicon), download `ClipCascade-Apple_macOS(ARM_M-Series).zip`.
-      - **For Intel chips**, download `ClipCascade-Apple_macOS(Intel-Series).zip`.
-    - You can check your chip type by navigating to **Apple Menu** → **About This Mac**.
-   
-2. **Extract the Archive**
-    - Double-click the `.zip` file to extract its contents.
-
-3. **Locate the Application**
-    - Open the extracted folder to find the **ClipCascade** application.
-    - Move the application to a preferred location, such as the **Applications** folder.
-
-4. **First-time launch (see note below for more information)**
-    - **Right-click** (not double-click) on the **ClipCascade** application and select **Open**.
-     
-        <img src="https://github.com/user-attachments/assets/90b58940-69ed-4d35-a22d-1aa9988c014c" alt="ClipCascade->RightClick->Open" width="500" />
-    - If you encounter the warning *"Apple could not verify 'ClipCascade' is free..."*, click **Done** or **Ok**. ([Apple Guide](https://support.apple.com/en-us/102445))
-  
-
-       <img src="https://github.com/user-attachments/assets/986c3aef-28cf-4293-8ec8-180508d7e172" alt="Apple Warning" width="150" />
-       <img src="https://github.com/user-attachments/assets/8c604467-6dee-4977-8e3e-6473201e0e32" alt="Apple Warning" width="150" />
-       
-       - Go to **System Preferences** > **Security & Privacy** > Click **Open Anyway** (if you see the option), and when you re-run(right click->open) the application warning prompt reappears one last time, click **Open Anyway** or **Open**.  ([Apple Guide](https://support.apple.com/en-us/102445))
-         
-           <img src="https://github.com/user-attachments/assets/b6f41164-f73d-4e77-a110-b175a22057c6" alt="settings->security->open_anyway" width="250" />
-           <img src="https://github.com/user-attachments/assets/41bde005-537a-4950-bfe7-d55c9e767b15" alt="Apple Warning" width="150" />
-           <img src="https://github.com/user-attachments/assets/4803a2ba-acdf-41d9-a707-a8f22de12855" alt="Apple Warning" width="150" />
-
-5. **Wait for the app to launch**
-    - When you open the application, macOS will scan the application. This may take **10–30 seconds**.
-
-6. **Configure the application**
-    - When prompted, enter your **server's IP address, port number, or domain name**.
-    - If encryption is enabled, ensure it is **enabled on all devices**.
-    - In the **Extra Config** section, you can set a local clipboard size limit. By default, no limit is enforced (note: large file transfers may cause temporary unresponsiveness).
-
-7. **Network Access Prompt (P2P Mode)**
-    - If the server is running in **P2P mode**, you will see a macOS security prompt asking, **"Allow "ClipCascade" to find devices on local networks?"**
-
-      <img src="https://github.com/user-attachments/assets/91aae27e-f950-45a4-a4a1-09893e0573d3" alt="mac_network_prompt" width="150" />
-
-    - This is because each client device acts as a **peer** in the network, requiring direct communication.
-    - Click **Allow** to enable clipboard data syncing across your devices without the help of a server. The server is needed only for signaling and authentication.
-      
-8. **Access the App from the Menu Bar**
-    - Once logged in, the application will run in the **menu bar** with a clipboard icon at the top of your screen.
-
-9. **Enable Auto-Startup**:
-     - Right-click the **ClipCascade** icon in the dock (bottom of the screen).
-     - Select **Options** and then check **Open at Login**.
-       
-       <img src="https://github.com/user-attachments/assets/cadeb680-d1fd-4582-9d20-b41ba8713b39" alt="Startup" width="200" />
-     - Alternatively, open **Settings** → **General** → **Login Items & Extensions**, then add **ClipCascade** manually.
-
-**Important Note:** Since the application is not published or registered with Apple, you may see a warning suggesting that it could be unsafe. This is a standard precaution and does not indicate any issues with the software. You can choose to ignore this warning. All source code is available in this repository, and everything is open source and free. If you prefer, you can compile the executable yourself. Feel free to review the code to ensure your comfort! **Registering the application with Apple requires purchasing a certificate subscription, which is quite expensive, especially for an open-source project.**
-
-To build your own desktop executable from source (`ClipCascade_Desktop/src`):
-```bash
-pip3 install -r requirements_mac.txt
-python3 -m PyInstaller ClipCascade_macos.spec
-```
-
-[➡️ Explore Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details)
-
-* * * * * * *
-
-### 🤖📱 Android Mobile Application:
-
-To install the ClipCascade mobile application on your Android device, follow these steps:
-
-1. **Download** the latest APK from the [Releases page](https://github.com/Sathvik-Rao/ClipCascade/releases).
-2. **Enable** installation from unknown sources in your device settings, if prompted.
-3. **Install** the APK by following the prompts on your device.
-4. **Open** ClipCascade and log in to begin syncing your clipboard across devices.
-    - When prompted, enter your **server's IP address, port number, or domain name**.
-    - If encryption is enabled, ensure it is **enabled on all devices**.
-    - In the **Extra Config** section, you can set a local clipboard size limit. By default, no limit is enforced (note: large file transfers may cause temporary unresponsiveness).
-
-#### Android Automatic Clipboard Monitoring Setup:
-
-ClipCascade supports automatic clipboard monitoring for both rooted and non-rooted devices. To activate this feature, execute the following ADB commands.
-
-##### Install ADB
-
-Before proceeding, make sure ADB is installed on your system. Follow the instructions [here](https://www.xda-developers.com/install-adb-windows-macos-linux/) to install ADB on Windows, macOS, or Linux.
-
-##### ADB Commands
-
-1. **(Deprecated / removed)** Historical `READ_LOGS` grant — **no longer used** by current builds. Prefer Share / tile / notification capture. Legacy command only for old APKs:
-
-   ~~Grant the `READ_LOGS` permission:~~
-   ```bash
-   adb -d shell pm grant com.clipcascade android.permission.READ_LOGS
-   ```
-
-2. **Enable "Display/Drawing over other apps," "Screen overlay," or "Appear on top":**
-   This permission can also be enabled from the device's Settings. To set it via ADB, use:
-   ```bash
-   adb -d shell appops set com.clipcascade SYSTEM_ALERT_WINDOW allow
-   ```
-
-3. **Kill the app for the new permissions to take effect:**
-   ```bash
-   adb -d shell am force-stop com.clipcascade
-   ```
-![adb commands](https://github.com/user-attachments/assets/3faa8d71-d099-48d5-9846-4683cf77f285)
-
-> Once the setup is complete, it operates seamlessly without requiring any extra steps. It monitors log entries related to ClipCascade, and if it detects an error during a clipboard copy action, it will trigger an overlay window to gain focus. This overlay allows the app to capture the clipboard content and send it to the connected devices immediately before going out of focus and closing. When the app is uninstalled, these permissions will be removed, requiring you to redo these steps. Additionally, each time you start the foreground service, it will prompt you to choose whether to monitor logs. This ensures that everything remains secure and under your control.
-
-After executing three ADB commands, when you click the **Start** button, you will see a pop-up message. Click **"Allow."**
-
-<img src="https://github.com/user-attachments/assets/0d3649d7-1e57-448c-ade9-10641191402d" alt="allow_log_monitoring" width="200" />
-
-[➡️ Explore Advanced Details](https://github.com/Sathvik-Rao/ClipCascade?tab=readme-ov-file#%EF%B8%8F-advanced-details)
-
-* * * * * * *
-
-### 🐧🖱️ Linux Desktop Application (GUI) / 🐧⌨️ Linux Terminal-Based Application (CLI):
-
-This guide provides step-by-step instructions to install ClipCascade on Debian/Ubuntu, Fedora, and Arch-based systems. While the commands are specifically tailored for these distributions, you can adapt the process for other Linux distributions with minor modifications. The Linux code is available on the [Releases page](https://github.com/Sathvik-Rao/ClipCascade/releases) as `ClipCascade_Linux.zip`. Once downloaded, navigate to the `ClipCascade/` folder containing `main.py`, and open a terminal in that directory.
-
-> **Note:** On startup, ClipCascade reads a handful of **standard environment variables** your desktop session already sets—such as `XDG_SESSION_TYPE`, `WAYLAND_DISPLAY`, and `DISPLAY`—so it knows which display and clipboard APIs to use (the same kind of information any graphical app needs locally). From those values it classifies the environment as **X11**, **XWayland** (a Wayland session that also exposes an X11 socket), **Hyprland**, **native Wayland**, or **unknown**. That classification picks **both** the default clipboard integration (X11-style versus Wayland-style tools) **and** the default user interface (**GTK tray / GUI** versus **terminal-based CLI**). **X11**, **XWayland**, and **unknown** default to the X11-style clipboard path and **GUI**; **native Wayland** and **Hyprland** default to the Wayland-style clipboard path and **CLI**. You can override defaults with `--gui` and `--xmode` (see below)—for example, **`--gui true` on Wayland** still uses the Wayland clipboard path unless you also change `--xmode`.
+## Linux desktop: dependencies and troubleshooting
 
 #### Step 1: Check for updates and install required packages
 
@@ -702,6 +410,21 @@ cd /path/to/clipcascade/src/ && sudo python3 main.py
 
 
 ### 🗄️ Server Configuration
+
+#### Security-relevant settings in this fork
+
+These either behave differently from upstream or are new here. The full variable reference
+follows further down.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CC_SERVER_DB_PASSWORD` | *(none)* | **Required** for an on-disk H2 database; the server refuses to start without it. Format is `<file password> <user password>` — the space is part of the value, because the datasource uses `CIPHER=AES`. Upstream shipped a baked-in default, which also meant the "encrypted" file had a publicly known key. |
+| `CC_ALLOWED_ORIGINS` | `http://localhost:8080` | Exact origins, comma separated. **`*` refuses to start**: it is applied verbatim to both WebSocket endpoints, so any page a logged-in user visits could open a socket with their cookie and read their clipboard. |
+| `CC_BIND_ADDRESS` | `127.0.0.1` | Host address the container publishes on. Loopback by default so a server is never exposed on every interface by accident — set it to a tailnet or LAN address to reach it from other machines. |
+| `CC_TRUSTED_PROXY_CIDRS` | *(unset)* | Only set this behind a reverse proxy you control, and keep it as narrow as possible — ideally the single proxy host, e.g. `172.18.0.2/32`. When unset, forwarded headers are ignored entirely and the socket peer is authoritative. **Never include a range containing clients**: everything inside it is trusted to declare who it is forwarding for, so a client in that range can choose the address brute-force lockout keys on. |
+| `CC_FORWARDED_HEADER` | `X-Forwarded-For` | Which forwarding header to read, and only from a trusted proxy. Change it only if your proxy uses a different one, and make sure that proxy overwrites it on every request. |
+| `CC_SESSION_TIMEOUT` | `1440m` (24h) | Upstream defaulted to roughly a year. Set it back to `525960m` if you would rather not sign in daily. |
+| `CC_UPDATE_CHECK_ENABLED` | `true` | Set `false` to stop the server contacting GitHub for version checks — worth doing on an airgapped or private-mesh install. |
 
 #### Important Security Notice:
 **Set a strong initial admin password before first startup, then change it immediately after logging in** to prevent unauthorized access.
@@ -1349,25 +1072,22 @@ When fronting ClipCascade with an SSO proxy (Auth0, Keycloak, etc.), you’ll ne
 2. **Sync:** Copy any text or content to your clipboard, and it will automatically sync across your connected devices.
 3. **Monitor:** Open the web-based monitoring page to see your clipboard history in real-time.
 
-## 🌍 Contributing
+## Contributing
 
-Contributions are always welcome! Whether it's a feature request or a pull request, your input helps make ClipCascade even better.
+Fixes that are not fork-specific belong upstream at [Sathvik-Rao/ClipCascade](https://github.com/Sathvik-Rao/ClipCascade) —
+that is where the project lives and where everyone benefits. This fork carries the security
+baseline while [PR #163](https://github.com/Sathvik-Rao/ClipCascade/pull/163) is open.
 
-## 📜 License
+Issues specific to the hardening or the published image: use this fork's tracker.
 
-ClipCascade is licensed under the GNU General Public License v3.0 (GPL-3.0). See the [LICENSE](https://github.com/Sathvik-Rao/ClipCascade/blob/main/LICENSE) file for more details.
+Before proposing changes here, run the suites:
 
-
-## 🛠️ TODO
-
-Here are some planned features and improvements for future releases of ClipCascade:
-
-🗳️ **Poll for Prioritization**: Cast your vote to prioritize features [here](https://github.com/Sathvik-Rao/ClipCascade/discussions/25).
-
-- **Clipboard Data Storage:** Implement secure storage for clipboard data to store and access it later. 
-- **OIDC/OAuth Authentication:** Integrate OpenID Connect (OIDC) and OAuth authentication for user login and management.  
-- **iOS Support:** Develop and Release a version of ClipCascade for iOS.  
-
+```bash
+python3 scripts/check-versions.py
+cd ClipCascade_Desktop/src && python -m unittest discover -s tests
+cd ClipCascade_Mobile/src   && npx jest --watchAll=false && npx eslint .
+cd ClipCascade_Server/ClipCascade_Backend && ./mvnw test
+```
 
 ## 📦 Versioning
 
@@ -1391,7 +1111,15 @@ Example versioning:
 - **2.0.0**: Major changes, **not backward compatible**.
 
 
-## 💬 Support
+## License
 
-If you have any issues or questions, feel free to open an issue on GitHub, start a discussion, or reach out to me via [email](mailto:sathvik.poladi@gmail.com).
+GPL-3.0, inherited from upstream. See [`LICENSE`](LICENSE).
 
+ClipCascade is the work of [Sathvik Rao](https://github.com/Sathvik-Rao) and its contributors;
+this fork only adds the security baseline described above.
+
+## Support
+
+For upstream questions and the community server, see
+[Sathvik-Rao/ClipCascade](https://github.com/Sathvik-Rao/ClipCascade).
+For this fork, open an issue here.
