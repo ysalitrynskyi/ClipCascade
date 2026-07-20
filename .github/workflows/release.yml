@@ -124,23 +124,16 @@ jobs:
             label: windows
             spec: ClipCascade_win.spec
             requirements: requirements_win.txt
-          # macos-latest is Apple silicon; macos-13 is the last Intel runner.
-          # PyInstaller cannot cross-build, so an Intel Mac needs its own job —
-          # upstream ships both, and dropping one silently strands those users.
+          # Apple silicon only. An Intel job (macos-13) was tried and removed:
+          # GitHub is retiring that image and it never got a runner, sitting
+          # queued for the full 24-hour limit before being cancelled — which
+          # delayed the whole release by a day, because timeout-minutes governs
+          # running jobs, not queued ones. PyInstaller cannot cross-build, so
+          # Intel Macs run from source; the README says so.
           - os: macos-latest
             label: macos-arm64
             spec: ClipCascade_macos.spec
             requirements: requirements_mac.txt
-          - os: macos-13
-            label: macos-intel
-            spec: ClipCascade_macos.spec
-            requirements: requirements_mac.txt
-            # GitHub is retiring the Intel macOS image, so this job can sit
-            # queued indefinitely. Never let it hold up a release: if a runner
-            # is available the build ships, otherwise the release goes out
-            # without it.
-            optional: true
-    continue-on-error: ${{ matrix.optional || false }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

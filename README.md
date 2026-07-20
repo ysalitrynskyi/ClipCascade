@@ -82,6 +82,11 @@ open a port to the internet. See [`docs/TAILSCALE.md`](docs/TAILSCALE.md).
 
 ### Desktop (Windows, macOS, Linux)
 
+Prebuilt Windows (`.exe`) and Apple silicon macOS builds are attached to each
+[release](https://github.com/ysalitrynskyi/ClipCascade/releases). There is **no Intel macOS
+build**: GitHub is retiring the Intel runner image and it never picks up a job, and PyInstaller
+cannot cross-build from Apple silicon. On an Intel Mac, and on Linux, run from source.
+
 The desktop client is Python and runs directly from source:
 
 ```bash
